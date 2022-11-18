@@ -1,0 +1,192 @@
+---
+title: "Homework #7: SVM and Generative Classifiers" 
+author: "Ben Wilson"
+date: "Due: Wed Oct 26 | 11:45am"
+output: 
+  pdf_document:
+    toc: yes
+  html_document:
+    theme: cosmo
+    toc: yes
+    toc_float: yes
+editor_options:
+  chunk_output_type: inline
+---
+
+**DS 6030 | Fall 2022 | University of Virginia**
+
+------------------------------------------------------------------------
+
+```{r config, echo=FALSE}
+source(system.file("config/hw_config.R", package="R6030")) # knitr settings
+options(dplyr.summarise.inform = FALSE)  # ignore dplyr message about grouping
+```
+
+
+# Required R packages and Directories
+
+```{r packages, message=FALSE, warning=FALSE}
+data_dir = 'https://mdporter.github.io/DS6030/data/' # data directory
+library(R6030)     # functions for DS-6030
+library(tidyverse) # functions for data manipulation
+library(e1071)     # svm functions
+
+# Add other libraries here
+library(plyr)
+library(mvtnorm)
+library(yardstick)
+```
+
+
+# Problem 1: Handwritten Digit Recognition
+
+## a. Load the MNIST training and testing data. 
+The data are `.rds` format. Training data has 1000 samples from each class. The test data has only one sample from each class. 
+[Training Data](`r file.path(data_dir, "mnist_train.rds")`)
+[Testing Data](`r file.path(data_dir, "mnist_test.rds")`)
+
+
+```{r}
+#load rds data
+df_test <- readRDS("mnist_test.rds")
+df_train <- readRDS("mnist_train.rds")
+```
+
+
+## b. Quadratic Discriminant Analysis (QDA)
+
+Implement quadratic discriminant analysis (QDA) step-by-step (i.e., manually).
+
+```{r}
+## create matrix to capture values for digits 0-9
+val = matrix(ncol=10, nrow=nrow(df_test))
+
+## function to iterate across digits 0-9 in data
+for (i in 0:9){
+  
+  #create subset of train without label
+  train_var = df_train %>% 
+    filter(label == i) %>% 
+    select(-label)
+  
+  #create subset of test without label
+  test_var = df_test %>% 
+    select(-label)
+  
+  #calculate means for training subset
+  means = colMeans(train_var)
+  
+  #calculate prior prob
+    #use training subset and training data
+  prior = nrow(train_var)/nrow(df_train)
+  
+  #calculate covariance values
+  covariance = cov(train_var)
+  
+  #iterate over test data subset
+  for (j in 1:nrow(test_var)){
+    test_row = test_var[j,]
+    
+    #calculate QDA using mathematical equation and model inputs
+    val[j,i+1] = det(covariance)^(-1/2)*(2*pi)^-(ncol(train_var)/2)*exp(-1/2*data.matrix(test_row - means)%*%data.matrix(solve(covariance))%*%data.matrix(t(test_row - means)))*prior
+  }
+  
+  #input values to matrix for capturing values
+  colnames(val) <- c(0:9)
+  
+  #calculate normalized prob
+  probs = val
+  
+  for (k in 1:nrow(val)){
+    probs[k,] = val[k,]/sum(val[k,])
+  }
+  
+  #identify acuracy
+  colnames(probs)[max.col(probs,ties.method="first")]
+  analysis = cbind(df_test, "pred" = colnames(probs)[max.col(probs,ties.method="first")])
+}
+
+#calculate for misclassification rate
+analysis$misclass = ifelse(analysis$label == analysis$pred, 0, 1)
+
+## Misclass rate
+sum(analysis$misclass)/nrow(analysis)
+
+```
+
+# Problem 2: One-vs-Rest
+
+## a. Support Vector Machines (SVM) for 2-class problem
+
+```{r}
+#create copy of training data for manipulation
+df_train_dig0 = df_train
+
+#identify 0 digit for fitting model
+df_train_dig0$label = ifelse(df_train_dig0$label == 0, 1, -1)
+df_train_dig0$label = factor(df_train_dig0$label)
+
+#fit training data for model
+fit = svm(label ~ ., data = df_train_dig0,
+          
+          #radial basis svm turning
+          kernel = "radial",
+          
+          #cost given for problem
+          cost = 100, 
+          
+          #probability given for problem
+          probability = TRUE)
+
+#perform predictions on test data based on trained data
+pred = predict(fit, df_test%>% select(-label), probability=TRUE) %>%
+  attr("probabilities")
+
+#predict output
+pred
+```
+
+## b. Game time. Implement one-vs-rest for the MNIST data. 
+
+```{r}
+#create matrix for capturing values from svm function
+val_probs = matrix(nrow = 10, ncol = 10)
+
+for (i in 0:9){
+  #create copy of training data for manipulation of all digits
+  df_train_dig = df_train
+  
+  #identify 0 digit for fitting model
+  df_train_dig$label = ifelse(df_train_dig$label == i, 1, -1)
+  df_train_dig$label = factor(df_train_dig$label)
+  
+  #fit training data for model
+  fit = svm(label ~ ., data = df_train_dig,
+          
+          #radial basis svm turning
+          kernel = "radial",
+          
+          #cost given for problem
+          cost = 100, 
+          
+          #probability given for problem
+          probability = TRUE)
+  
+  #perform predictions on test data based on trained data
+  pred = predict(fit, df_test, probability = TRUE) %>% 
+    attr("probabilities")
+  
+  #print which digit is being predicted
+  print(paste0('Digit Predicted : ', i))
+  
+  #print prediction
+  print(pred)
+  
+  #identify prediction probability for digits 0-9
+  val_probs[,i+1]= pred[,2]
+  
+}
+
+```
+
+
